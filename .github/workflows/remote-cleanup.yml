@@ -1,0 +1,117 @@
+name: Remote Cleanup (delete a file on FTP) (reusable)
+
+on:
+    workflow_call:
+        inputs:
+            environment:
+                description: 'staging | production'
+                required: true
+                type: string
+            target_path:
+                description: 'Path to delete, relative to the theme root (e.g. "hot")'
+                required: true
+                type: string
+            config-file:
+                description: 'Path to deploy.json in the caller repo'
+                required: false
+                type: string
+                default: '.github/config/deploy.json'
+
+jobs:
+    delete-remote-file:
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        steps:
+            - name: Checkout caller repository
+              uses: actions/checkout@v5
+
+            - name: Delete remote file
+              env:
+                  ENVIRONMENT: ${{ inputs.environment }}
+                  TARGET_PATH: ${{ inputs.target_path }}
+                  CONFIG_FILE: ${{ inputs.config-file }}
+                  STAGING_FTP_USERNAME: ${{ secrets.STAGING_FTP_USERNAME }}
+                  STAGING_FTP_PASSWORD: ${{ secrets.STAGING_FTP_PASSWORD }}
+                  PRODUCTION_FTP_USERNAME: ${{ secrets.PRODUCTION_FTP_USERNAME }}
+                  PRODUCTION_FTP_PASSWORD: ${{ secrets.PRODUCTION_FTP_PASSWORD }}
+              run: |
+                  sudo apt-get install -y -qq lftp jq
+
+                  set -e
+
+                  ENVIRONMENT="${ENVIRONMENT:?ENVIRONMENT is required}"
+                  TARGET_PATH="${TARGET_PATH:?TARGET_PATH is required}"
+
+                  # Guardrails: never allow deleting the whole remote root or traversing out
+                  # of it.
+                  if [ -z "$TARGET_PATH" ] || [ "$TARGET_PATH" = "/" ] || [ "$TARGET_PATH" = "." ]; then
+                    echo "❌ Refusing to delete an empty/root path"
+                    exit 1
+                  fi
+                  case "$TARGET_PATH" in
+                    ..|../*|*/../*|*/..)
+                      echo "❌ TARGET_PATH must not contain '..'"
+                      exit 1
+                      ;;
+                  esac
+
+                  if [ ! -f "$CONFIG_FILE" ]; then
+                    echo "❌ Config file not found: $CONFIG_FILE"
+                    exit 1
+                  fi
+
+                  REMOTE_PATH=$(jq -r ".${ENVIRONMENT}.remotePath" "$CONFIG_FILE")
+                  FTP_HOST=$(jq -r ".${ENVIRONMENT}.ftpHost" "$CONFIG_FILE")
+                  PROTOCOL=$(jq -r ".${ENVIRONMENT}.protocol // \"ftp\"" "$CONFIG_FILE")
+                  THEME=$(jq -r ".${ENVIRONMENT}.themes[0] // \"\"" "$CONFIG_FILE")
+
+                  ENV_UPPER=$(echo "$ENVIRONMENT" | tr '[:lower:]' '[:upper:]')
+                  USERNAME_VAR="${ENV_UPPER}_FTP_USERNAME"
+                  PASSWORD_VAR="${ENV_UPPER}_FTP_PASSWORD"
+                  USERNAME="${!USERNAME_VAR}"
+                  PASSWORD="${!PASSWORD_VAR}"
+
+                  if [ -z "$FTP_HOST" ] || [ "$FTP_HOST" = "null" ]; then
+                    echo "❌ ftpHost is not set in deploy.json for $ENVIRONMENT"
+                    exit 1
+                  fi
+                  if [ -z "$USERNAME" ] || [ -z "$PASSWORD" ]; then
+                    echo "❌ Missing credentials. Expected secrets: $USERNAME_VAR / $PASSWORD_VAR"
+                    exit 1
+                  fi
+
+                  FULL_REMOTE="$REMOTE_PATH/$THEME/$TARGET_PATH"
+
+                  echo "🌐 Environment: $ENVIRONMENT"
+                  echo "   Host:   $FTP_HOST"
+                  echo "   Target: $FULL_REMOTE"
+                  echo ""
+
+                  FTP_SCRIPT=$(mktemp)
+                  trap 'rm -f "$FTP_SCRIPT"' EXIT
+
+                  {
+                    echo "set ssl:verify-certificate no"
+                    echo "set net:timeout 15"
+                    echo "set net:max-retries 3"
+                    echo "set net:reconnect-interval-base 3"
+                    if [ "$PROTOCOL" = "sftp" ]; then
+                      echo "set sftp:auto-confirm yes"
+                      echo "open sftp://$FTP_HOST"
+                    else
+                      echo "set ftp:passive-mode on"
+                      echo "open $FTP_HOST"
+                    fi
+                    safe_user="${USERNAME//\\/\\\\}"; safe_user="${safe_user//\"/\\\"}"
+                    safe_pass="${PASSWORD//\\/\\\\}"; safe_pass="${safe_pass//\"/\\\"}"
+                    echo "user \"$safe_user\" \"$safe_pass\""
+                    echo "cd $REMOTE_PATH/$THEME || exit 1"
+                    echo "rm -f $TARGET_PATH"
+                  } > "$FTP_SCRIPT"
+
+                  if timeout 30s lftp -f "$FTP_SCRIPT"; then
+                    echo "✓ Delete command sent for $TARGET_PATH (no error means it's gone or was already absent)"
+                  else
+                    echo "❌ Delete failed"
+                    exit 1
+                  fi
