@@ -1,0 +1,13 @@
+name: Deploy to Staging
+
+on:
+  push:
+    branches: [staging] # change to match this project's staging branch
+  workflow_dispatch:
+
+jobs:
+  deploy-staging:
+    uses: Unknownsock/gha-wp-deploy/.github/workflows/deploy.yml@v1
+    with:
+      environment: staging
+    secrets: inherit

@@ -1,0 +1,24 @@
+name: Remote Cleanup (delete a file on FTP)
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+      target_path:
+        description: 'Path to delete, relative to the theme root (e.g. "hot")'
+        required: true
+        default: "hot"
+
+jobs:
+  delete-remote-file:
+    uses: Unknownsock/gha-wp-deploy/.github/workflows/remote-cleanup.yml@v1
+    with:
+      environment: ${{ inputs.environment }}
+      target_path: ${{ inputs.target_path }}
+    secrets: inherit

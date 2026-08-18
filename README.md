@@ -40,51 +40,44 @@ git-ignored.
 
 ## Setup in a project repo
 
-**1. Add `.github/config/deploy.json`:**
+**1. Copy the [`examples/.github`](examples/.github) folder into your
+project's `.github` folder.** Its layout mirrors exactly where each file
+needs to land:
 
-```json
-{
-    "staging": {
-        "enabled": true,
-        "uploadAll": false,
-        "clean": false,
-        "chunkSize": 100,
-        "themes": ["your-theme"],
-        "remotePath": "/public_html/staging.example.com/wp-content/themes",
-        "ftpHost": "203.0.113.10",
-        "protocol": "ftp"
-    },
-    "production": {
-        "enabled": true,
-        "uploadAll": false,
-        "clean": false,
-        "chunkSize": 100,
-        "themes": ["your-theme"],
-        "remotePath": "/public_html/wp-content/themes",
-        "ftpHost": "203.0.113.10",
-        "protocol": "ftp"
-    }
-}
+```
+examples/.github/
+├── config/
+│   └── deploy.json              → your-project/.github/config/deploy.json
+└── workflows/
+    ├── deploy-main.yml          → your-project/.github/workflows/deploy-main.yml
+    ├── deploy-staging.yml       → your-project/.github/workflows/deploy-staging.yml
+    └── remote-cleanup.yml       → your-project/.github/workflows/remote-cleanup.yml
 ```
 
-| field       | meaning                                                             |
-| ----------- | -------------------------------------------------------------------- |
-| `enabled`   | set `false` to no-op a deploy without deleting the workflow           |
-| `uploadAll` | force a full re-upload instead of diffing against the last deploy    |
-| `clean`     | wipe the remote theme folder before uploading (implies `uploadAll`)  |
-| `chunkSize` | files per FTP connection/chunk; `0` = one connection for everything  |
-| `themes`    | theme folder name(s) under `themes/` to deploy                       |
-| `remotePath`| absolute path on the server to the `themes` parent directory         |
-| `ftpHost`   | FTP/SFTP host                                                        |
-| `protocol`  | `ftp` or `sftp`                                                      |
+**2. Edit `deploy.json`** — every value in the copied file is a placeholder
+(`your.ftp.host`, `your-theme-name`, etc.). Fill in the real host, remote
+path, and theme folder name(s) for this project:
 
-**2. Add repo secrets** (Settings → Secrets and variables → Actions):
+| field         | meaning                                                              |
+| ------------- | --------------------------------------------------------------------- |
+| `enabled`     | set `false` to no-op a deploy without deleting the workflow           |
+| `uploadAll`   | force a full re-upload instead of diffing against the last deploy     |
+| `clean`       | wipe the remote theme folder before uploading (implies `uploadAll`)   |
+| `chunkSize`   | files per FTP connection/chunk; `0` = one connection for everything   |
+| `themes`      | theme folder name(s) under `themes/` to deploy                        |
+| `remotePath`  | absolute path on the server to the `themes` parent directory          |
+| `ftpHost`     | FTP/SFTP host                                                         |
+| `protocol`    | `ftp` or `sftp`                                                       |
+
+**3. Adjust `deploy-staging.yml`'s trigger branch** if this project's staging
+branch isn't called `staging`.
+
+**4. Add repo secrets** (Settings → Secrets and variables → Actions):
 `STAGING_FTP_USERNAME`, `STAGING_FTP_PASSWORD`, `PRODUCTION_FTP_USERNAME`,
 `PRODUCTION_FTP_PASSWORD` — whichever environments you use.
 
-**3. Add caller workflows** — see [WORKFLOWS.md](WORKFLOWS.md) for the exact
-files to copy in, and for this repo's own workflow source if you want to read
-or fork it.
+**5. Commit, push, and trigger a staging run** to confirm the reusable
+workflow resolves and deploys correctly before trusting it on `main`.
 
 ## Versioning
 
@@ -97,7 +90,21 @@ git tag -f v1 v1.1.0
 git push origin v1.1.0 v1 --force
 ```
 
-Projects pin `uses: <owner>/gha-wp-deploy/.github/workflows/deploy.yml@v1` to
-get fixes automatically, or an exact `@v1.1.0` to stay frozen. A breaking
+Projects pin `uses: Unknownsock/gha-wp-deploy/.github/workflows/deploy.yml@v1`
+to get fixes automatically, or an exact `@v1.1.0` to stay frozen. A breaking
 change (renamed/removed input) bumps to `v2` so nothing pinned at `@v1` moves
 until it opts in.
+
+## Creating/re-publishing this repo
+
+```sh
+git init
+git add -A
+git commit -m "Initial reusable deploy workflows"
+git branch -M main
+git remote add origin https://github.com/Unknownsock/gha-wp-deploy.git
+git push -u origin main
+git tag v1.0.0
+git tag v1
+git push origin v1.0.0 v1
+```
